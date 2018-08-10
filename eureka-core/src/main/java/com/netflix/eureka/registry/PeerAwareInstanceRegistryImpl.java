@@ -385,7 +385,8 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
             // Eureka-Server的保护机制
             synchronized (lock) {
                 if (this.expectedNumberOfRenewsPerMin > 0) {
-                    // Since the client wants to cancel it, reduce the threshold (1 for 30 seconds, 2 for a minute)
+                    // 重点在这里，，，，，主动下线的时候，需要去更新每分钟最大续约数，
+                    // 一个客户端的每30秒续约一次，一分钟就是续约两次，所以需要减2.
                     this.expectedNumberOfRenewsPerMin = this.expectedNumberOfRenewsPerMin - 2;
                     this.numberOfRenewsPerMinThreshold =
                             (int) (this.expectedNumberOfRenewsPerMin * serverConfig.getRenewalPercentThreshold());
@@ -489,6 +490,7 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
 
     @Override
     public boolean isLeaseExpirationEnabled() {
+        // 是否开启自我保护机制，这是个配置，默认为true
         if (!isSelfPreservationModeEnabled()) {
             // The self preservation mode is disabled, hence allowing the instances to expire.
             return true;
@@ -532,6 +534,7 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
     private void updateRenewalThreshold() {
         try {
             Applications apps = eurekaClient.getApplications();
+            // 计算有效的应用实例数量
             int count = 0;
             for (Application app : apps.getRegisteredApplications()) {
                 for (InstanceInfo instance : app.getInstances()) {

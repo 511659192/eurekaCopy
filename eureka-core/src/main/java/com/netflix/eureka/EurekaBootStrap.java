@@ -211,8 +211,9 @@ public class EurekaBootStrap implements ServletContextListener {
         serverContext.initialize();
         logger.info("Initialized server context");
 
-        // Copy registry from neighboring eureka node
+        // 服务刚刚启动的时候，去其他服务节点同步客户端的数量。
         int registryCount = registry.syncUp();
+        // 这个方法里面计算expectedNumberOfRenewsPerMin的值
         registry.openForTraffic(applicationInfoManager, registryCount);
 
         // Register all monitoring statistics.

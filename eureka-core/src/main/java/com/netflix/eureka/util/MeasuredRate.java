@@ -53,7 +53,7 @@ public class MeasuredRate {
                 @Override
                 public void run() {
                     try {
-                        // Zero out the current bucket.
+                        // 进行清0
                         lastBucket.set(currentBucket.getAndSet(0));
                     } catch (Throwable e) {
                         logger.error("Cannot reset the Measured Rate", e);

@@ -224,9 +224,7 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                 // Eureka-Server的自我保护机制做的操作，为每分钟最大续约数+2 ，同时重新计算每分钟最小续约数
                 synchronized (lock) {
                     if (this.expectedNumberOfRenewsPerMin > 0) {
-                        // Since the client wants to cancel it, reduce the threshold
-                        // (1
-                        // for 30 seconds, 2 for a minute)
+                        // 注册一个客户端，一个客户端每分钟需要两次续约，所以这里加2
                         this.expectedNumberOfRenewsPerMin = this.expectedNumberOfRenewsPerMin + 2;
                         this.numberOfRenewsPerMinThreshold = (int) (this.expectedNumberOfRenewsPerMin * serverConfig.getRenewalPercentThreshold());
                     }
@@ -604,6 +602,7 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
     public void evict(long additionalLeaseMs) {
         logger.debug("Running the evict task");
 
+        // 是否需要开启自我保护机制，如果需要，那么直接RETURE， 不需要继续往下执行了
         if (!isLeaseExpirationEnabled()) {
             logger.debug("DS: lease expiration is currently disabled.");
             return;
@@ -613,11 +612,13 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
         // if we do not that, we might wipe out whole apps before self preservation kicks in. By randomizing it,
         // the impact should be evenly distributed across all applications.
         List<Lease<InstanceInfo>> expiredLeases = new ArrayList<>();
+        // 循环遍历本地CurrentHashMap中的实例信息
         for (Entry<String, Map<String, Lease<InstanceInfo>>> groupEntry : registry.entrySet()) {
             Map<String, Lease<InstanceInfo>> leaseMap = groupEntry.getValue();
             if (leaseMap != null) {
                 for (Entry<String, Lease<InstanceInfo>> leaseEntry : leaseMap.entrySet()) {
                     Lease<InstanceInfo> lease = leaseEntry.getValue();
+                    // 判断是否过期，此处为重点，里面有判断实例过期的依据
                     if (lease.isExpired(additionalLeaseMs) && lease.getHolder() != null) {
                         expiredLeases.add(lease);
                     }
@@ -627,14 +628,17 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
 
         // To compensate for GC pauses or drifting local time, we need to use current registry size as a base for
         // triggering self-preservation. Without that we would wipe out full registry.
+        // 获取注册的实例数量
         int registrySize = (int) getLocalRegistrySize();
+        // serverConfig.getRenewalPercentThreshold() 为0.85 ， 主要是为了避免开启自动保护机制。 所以会逐步过期
         int registrySizeThreshold = (int) (registrySize * serverConfig.getRenewalPercentThreshold());
+        // 可以过期的数量
         int evictionLimit = registrySize - registrySizeThreshold;
-
+        // 取最小值，在过期数量和可以过期的数量中间取最小值。
         int toEvict = Math.min(expiredLeases.size(), evictionLimit);
         if (toEvict > 0) {
             logger.info("Evicting {} items (expired={}, evictionLimit={})", toEvict, expiredLeases.size(), evictionLimit);
-
+            // 随机过期
             Random random = new Random(System.currentTimeMillis());
             for (int i = 0; i < toEvict; i++) {
                 // Pick a random item (Knuth shuffle algorithm)
@@ -644,8 +648,10 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
 
                 String appName = lease.getHolder().getAppName();
                 String id = lease.getHolder().getId();
+                // 写入过期监控
                 EXPIRED.increment();
                 logger.warn("DS: Registry: expired lease for {}/{}", appName, id);
+                // 服务下线
                 internalCancel(appName, id, false);
             }
         }
@@ -1233,6 +1239,8 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
     }
 
     protected void postInit() {
+        // 每个Eureka-Server端都维护着，每分钟的续约数量，续约数量是有一个Long类型的变量来存储的，
+        // 每过一分钟就需要对这个变量进行清0 ， 因此这个地方是为了启动这个线程
         renewsLastMin.start();
         if (evictionTaskRef.get() != null) {
             evictionTaskRef.get().cancel();
@@ -1265,6 +1273,7 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
         @Override
         public void run() {
             try {
+                // 获取延迟秒数，就是延迟几秒下线
                 long compensationTimeMs = getCompensationTimeMs();
                 logger.info("Running the evict task with compensationTime {}ms", compensationTimeMs);
                 evict(compensationTimeMs);
