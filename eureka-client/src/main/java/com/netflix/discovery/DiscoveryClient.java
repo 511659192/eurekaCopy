@@ -1230,8 +1230,9 @@ public class DiscoveryClient implements EurekaClient {
                         applications.addApplication(app);
                     }
                     logger.debug("Added instance {} to the existing apps in region {}", instance.getId(), instanceRegion);
+                    // 为本地这个应用添加这个实例
                     applications.getRegisteredApplications(instance.getAppName()).addInstance(instance);
-                } else if (ActionType.MODIFIED.equals(instance.getActionType())) {
+                } else if (ActionType.MODIFIED.equals(instance.getActionType())) { // 修改事件
                     Application existingApp = applications.getRegisteredApplications(instance.getAppName());
                     if (existingApp == null) {
                         applications.addApplication(app);
@@ -1240,12 +1241,13 @@ public class DiscoveryClient implements EurekaClient {
 
                     applications.getRegisteredApplications(instance.getAppName()).addInstance(instance);
 
-                } else if (ActionType.DELETED.equals(instance.getActionType())) {
+                } else if (ActionType.DELETED.equals(instance.getActionType())) { // 删除事件
                     Application existingApp = applications.getRegisteredApplications(instance.getAppName());
                     if (existingApp == null) {
                         applications.addApplication(app);
                     }
                     logger.debug("Deleted instance {} to the existing apps ", instance.getId());
+                    // 移除这个实例
                     applications.getRegisteredApplications(instance.getAppName()).removeInstance(instance);
                 }
             }
@@ -1466,6 +1468,7 @@ public class DiscoveryClient implements EurekaClient {
      */
     class CacheRefreshThread implements Runnable {
         public void run() {
+            // 刷新注册信息
             refreshRegistry();
         }
     }
@@ -1517,8 +1520,7 @@ public class DiscoveryClient implements EurekaClient {
                     allAppsHashCodes.append(" , apps hashcode: ");
                     allAppsHashCodes.append(entry.getValue().getAppsHashCode());
                 }
-                logger.debug("Completed cache refresh task for discovery. All Apps hash code is {} ",
-                        allAppsHashCodes);
+                logger.debug("Completed cache refresh task for discovery. All Apps hash code is {} ", allAppsHashCodes);
             }
         } catch (Throwable e) {
             logger.error("Cannot fetch registry from server", e);
