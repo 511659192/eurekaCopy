@@ -826,6 +826,7 @@ public class DiscoveryClient implements EurekaClient {
         logger.info(PREFIX + "{}: registering service...", appPathIdentifier);
         EurekaHttpResponse<Void> httpResponse;
         try {
+            // 发起HTTP请求
             httpResponse = eurekaTransport.registrationClient.register(instanceInfo);
         } catch (Exception e) {
             logger.warn(PREFIX + "{} - registration failed {}", appPathIdentifier, e.getMessage(), e);
@@ -845,6 +846,7 @@ public class DiscoveryClient implements EurekaClient {
         try {
             httpResponse = eurekaTransport.registrationClient.sendHeartBeat(instanceInfo.getAppName(), instanceInfo.getId(), instanceInfo, null);
             logger.debug(PREFIX + "{} - Heartbeat status: {}", appPathIdentifier, httpResponse.getStatusCode());
+            // 接口返回值为404，就是说不存在，从来没有注册过，那么重新走注册流程
             if (httpResponse.getStatusCode() == Status.NOT_FOUND.getStatusCode()) {
                 REREGISTER_COUNTER.increment();
                 logger.info(PREFIX + "{} - Re-registering apps/{}", appPathIdentifier, instanceInfo.getAppName());
@@ -891,13 +893,16 @@ public class DiscoveryClient implements EurekaClient {
                 applicationInfoManager.unregisterStatusChangeListener(statusChangeListener.getId());
             }
 
+            // 取消定时任务（心跳，缓存刷新等）
             cancelScheduledTasks();
 
-            // If APPINFO was registered
+            // 如果app注册过，那么需要取消注册，也就说需要主动下线
             if (applicationInfoManager != null
                     && clientConfig.shouldRegisterWithEureka()
                     && clientConfig.shouldUnregisterOnShutdown()) {
+                // 设置实例的状态为DOWN
                 applicationInfoManager.setInstanceStatus(InstanceStatus.DOWN);
+                // 执行下线
                 unregister();
             }
 
@@ -916,7 +921,7 @@ public class DiscoveryClient implements EurekaClient {
      * unregister w/ the eureka service.
      */
     void unregister() {
-        // It can be null if shouldRegisterWithEureka == false
+        // 如果是非注册的实例，那么eurekaTransport可能是为空的，所以做一下判断
         if(eurekaTransport != null && eurekaTransport.registrationClient != null) {
             try {
                 logger.info("Unregistering ...");
@@ -1238,11 +1243,15 @@ public class DiscoveryClient implements EurekaClient {
     }
 
     /**
-     * Initializes all scheduled tasks.
+     主要作用就是：
+     1.开启缓刷新定时器
+     2.开启发送心跳的定时器
+     3.开启实例instance状态变更监听
+     4.开启应用状态复制器（主要就是为了开启一个定时线程，每40秒判断实例信息是否变更，如果变更了则重新注册）
      */
     private void initScheduledTasks() {
         if (clientConfig.shouldFetchRegistry()) {
-            // registry cache refresh timer
+            // 刷新缓存的定时器
             int registryFetchIntervalSeconds = clientConfig.getRegistryFetchIntervalSeconds();
             int expBackOffBound = clientConfig.getCacheRefreshExecutorExponentialBackOffBound();
             scheduler.schedule(
@@ -1263,7 +1272,7 @@ public class DiscoveryClient implements EurekaClient {
             int expBackOffBound = clientConfig.getHeartbeatExecutorExponentialBackOffBound();
             logger.info("Starting heartbeat executor: " + "renew interval is: {}", renewalIntervalInSecs);
 
-            // Heartbeat timer
+            // 发送心跳的定时器
             scheduler.schedule(
                     new TimedSupervisorTask(
                             "heartbeat",
@@ -1276,13 +1285,13 @@ public class DiscoveryClient implements EurekaClient {
                     ),
                     renewalIntervalInSecs, TimeUnit.SECONDS);
 
-            // InstanceInfo replicator
             instanceInfoReplicator = new InstanceInfoReplicator(
                     this,
                     instanceInfo,
                     clientConfig.getInstanceInfoReplicationIntervalSeconds(),
                     2); // burstSize
 
+            // 监听instance的状态变更
             statusChangeListener = new ApplicationInfoManager.StatusChangeListener() {
                 @Override
                 public String getId() {
@@ -1306,6 +1315,7 @@ public class DiscoveryClient implements EurekaClient {
                 applicationInfoManager.registerStatusChangeListener(statusChangeListener);
             }
 
+            // 开启实例信息复制器
             instanceInfoReplicator.start(clientConfig.getInitialInstanceInfoReplicationIntervalSeconds());
         } else {
             logger.info("Not registering with Eureka server per configuration");

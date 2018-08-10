@@ -182,6 +182,7 @@ public class ApplicationResource {
             }
         }
 
+        // 服务端是接收到请求之后是如何处理的
         registry.register(info, "true".equals(isReplication));
         return Response.status(204).build();  // 204 to be backwards compatible
     }

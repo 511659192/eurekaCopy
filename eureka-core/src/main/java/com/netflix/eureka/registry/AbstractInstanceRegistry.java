@@ -191,24 +191,27 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
     public void register(InstanceInfo registrant, int leaseDuration, boolean isReplication) {
         try {
             read.lock();
+            // 从本地MAP里面获取当前实例的信息。
             Map<String, Lease<InstanceInfo>> gMap = registry.get(registrant.getAppName());
+            // 增加注册次数到监控信息里面去。
             REGISTER.increment(isReplication);
             if (gMap == null) {
+                // 如果第一次进来，那么gMap为空，则创建一个ConcurrentHashMap放入到registry里面去
                 final ConcurrentHashMap<String, Lease<InstanceInfo>> gNewMap = new ConcurrentHashMap<String, Lease<InstanceInfo>>();
                 gMap = registry.putIfAbsent(registrant.getAppName(), gNewMap);
                 if (gMap == null) {
+                    // 表明map中确实不存在，则设置gMap为最新创建的那个
                     gMap = gNewMap;
                 }
             }
+            // 从MAP中查询已经存在的Lease信息 （比如第二次来）
             Lease<InstanceInfo> existingLease = gMap.get(registrant.getId());
-            // Retain the last dirty timestamp without overwriting it, if there is already a lease
+            // 当Lease的对象不为空时。
             if (existingLease != null && (existingLease.getHolder() != null)) {
+                // 当instance已经存在是，和客户端的instance的信息做比较，时间最新的那个，为有效instance信息
                 Long existingLastDirtyTimestamp = existingLease.getHolder().getLastDirtyTimestamp();
                 Long registrationLastDirtyTimestamp = registrant.getLastDirtyTimestamp();
                 logger.debug("Existing lease found (existing={}, provided={}", existingLastDirtyTimestamp, registrationLastDirtyTimestamp);
-
-                // this is a > instead of a >= because if the timestamps are equal, we still take the remote transmitted
-                // InstanceInfo instead of the server local copy.
                 if (existingLastDirtyTimestamp > registrationLastDirtyTimestamp) {
                     logger.warn("There is an existing lease and the existing lease's dirty timestamp {} is greater" +
                             " than the one that is being registered {}", existingLastDirtyTimestamp, registrationLastDirtyTimestamp);
@@ -216,24 +219,28 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                     registrant = existingLease.getHolder();
                 }
             } else {
-                // The lease does not exist and hence it is a new registration
+                // 这里只有当existinglease不存在时，才会进来。
+                // 恢复心跳，信息过期的，都不会进入这里。
+                // Eureka-Server的自我保护机制做的操作，为每分钟最大续约数+2 ，同时重新计算每分钟最小续约数
                 synchronized (lock) {
                     if (this.expectedNumberOfRenewsPerMin > 0) {
                         // Since the client wants to cancel it, reduce the threshold
                         // (1
                         // for 30 seconds, 2 for a minute)
                         this.expectedNumberOfRenewsPerMin = this.expectedNumberOfRenewsPerMin + 2;
-                        this.numberOfRenewsPerMinThreshold =
-                                (int) (this.expectedNumberOfRenewsPerMin * serverConfig.getRenewalPercentThreshold());
+                        this.numberOfRenewsPerMinThreshold = (int) (this.expectedNumberOfRenewsPerMin * serverConfig.getRenewalPercentThreshold());
                     }
                 }
                 logger.debug("No previous lease information found; it is new registration");
             }
+            // 构建一个最新的Lease信息
             Lease<InstanceInfo> lease = new Lease<InstanceInfo>(registrant, leaseDuration);
             if (existingLease != null) {
+                // 当原来存在Lease的信息时，设置他的serviceUpTimestamp, 保证服务开启的时间一直是第一次的那个
                 lease.setServiceUpTimestamp(existingLease.getServiceUpTimestamp());
             }
             gMap.put(registrant.getId(), lease);
+            // 添加到最近的注册队列里面去，以时间戳作为Key， 名称作为value，主要是为了运维界面的统计数据。
             synchronized (recentRegisteredQueue) {
                 recentRegisteredQueue.add(new Pair<Long, String>(
                         System.currentTimeMillis(),
@@ -262,9 +269,12 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
             if (InstanceStatus.UP.equals(registrant.getStatus())) {
                 lease.serviceUp();
             }
+            // 设置注册类型为添加
             registrant.setActionType(ActionType.ADDED);
+            // 租约变更记录队列，记录了实例的每次变化， 用于注册信息的增量获取、
             recentlyChangedQueue.add(new RecentlyChangedItem(lease));
             registrant.setLastUpdatedTimestamp();
+            // 清理缓存 ，传入的参数为key
             invalidateCache(registrant.getAppName(), registrant.getVIPAddress(), registrant.getSecureVipAddress());
             logger.info("Registered instance {}/{} with status {} (replication={})",
                     registrant.getAppName(), registrant.getId(), registrant.getStatus(), isReplication);
@@ -300,28 +310,35 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
     protected boolean internalCancel(String appName, String id, boolean isReplication) {
         try {
             read.lock();
+            // 添加取消次数给监控信息，这里是个枚举类，收集了取消次数
             CANCEL.increment(isReplication);
             Map<String, Lease<InstanceInfo>> gMap = registry.get(appName);
             Lease<InstanceInfo> leaseToCancel = null;
             if (gMap != null) {
+                // 移除信息 ， 如果客户端是集群模式，此处仅移除这个实例ID对应的信息
                 leaseToCancel = gMap.remove(id);
             }
+            // 添加取消信息到取消队列，主要用于运维界面的信息统计
             synchronized (recentCanceledQueue) {
                 recentCanceledQueue.add(new Pair<Long, String>(System.currentTimeMillis(), appName + "(" + id + ")"));
             }
+            //移除这个实例ID对应的instance状态
             InstanceStatus instanceStatus = overriddenInstanceStatusMap.remove(id);
             if (instanceStatus != null) {
                 logger.debug("Removed instance id {} from the overridden map which has value {}", id, instanceStatus.name());
             }
             if (leaseToCancel == null) {
+                // 如果信息不存在，则说明这个实例从来没有注册过来，或者已经下线了。
                 CANCEL_NOT_FOUND.increment(isReplication);
                 logger.warn("DS: Registry: cancel failed because Lease is not registered for: {}/{}", appName, id);
                 return false;
             } else {
+                // 更新Lease实例信息里面的evictionTimestamp这个时间戳，标明下线时间
                 leaseToCancel.cancel();
                 InstanceInfo instanceInfo = leaseToCancel.getHolder();
                 String vip = null;
                 String svip = null;
+                // 获取VIP，SVIP，然后把instance的变化加入实例变化队列中
                 if (instanceInfo != null) {
                     instanceInfo.setActionType(ActionType.DELETED);
                     recentlyChangedQueue.add(new RecentlyChangedItem(leaseToCancel));
@@ -329,6 +346,7 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                     vip = instanceInfo.getVIPAddress();
                     svip = instanceInfo.getSecureVipAddress();
                 }
+                // 显示的清楚缓存 ， guava的API
                 invalidateCache(appName, vip, svip);
                 logger.info("Cancelled instance {}/{} (replication={})", appName, id, isReplication);
                 return true;
@@ -346,16 +364,19 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
      */
     public boolean renew(String appName, String id, boolean isReplication) {
         RENEW.increment(isReplication);
+        // 从Eureka-Server端本地的CurrentHashMap中，通过appName获取Lease信息
         Map<String, Lease<InstanceInfo>> gMap = registry.get(appName);
         Lease<InstanceInfo> leaseToRenew = null;
         if (gMap != null) {
             leaseToRenew = gMap.get(id);
         }
+        // lease为空，lease在第一次注册的时候会创建，为空，则表示从来没有注册过，租约不存在
         if (leaseToRenew == null) {
             RENEW_NOT_FOUND.increment(isReplication);
             logger.warn("DS: Registry: lease doesn't exist, registering resource: {} - {}", appName, id);
             return false;
         } else {
+            // 获取lease里面的instance信息
             InstanceInfo instanceInfo = leaseToRenew.getHolder();
             if (instanceInfo != null) {
                 // touchASGCache(instanceInfo.getASGName());
@@ -374,10 +395,11 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                                     instanceInfo.getOverriddenStatus().name(),
                                     instanceInfo.getId());
                     instanceInfo.setStatusWithoutDirty(overriddenInstanceStatus);
-
                 }
             }
+            // 设置每分钟的续约次数
             renewsLastMin.increment();
+            // 续约
             leaseToRenew.renew();
             return true;
         }

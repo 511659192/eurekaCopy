@@ -85,6 +85,7 @@ public class PeerEurekaNodes {
                 }
         );
         try {
+            // 首次进来，更新集群节点信息
             updatePeerEurekaNodes(resolvePeerUrls());
             Runnable peersUpdateTask = new Runnable() {
                 @Override

@@ -236,7 +236,9 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
     @Override
     public void openForTraffic(ApplicationInfoManager applicationInfoManager, int count) {
         // Renewals happen every 30 seconds and for a minute it should be a factor of 2.
+        // 计算每分钟最大续约数
         this.expectedNumberOfRenewsPerMin = count * 2;
+        // 每分钟最小续约数
         this.numberOfRenewsPerMinThreshold =
                 (int) (this.expectedNumberOfRenewsPerMin * serverConfig.getRenewalPercentThreshold());
         logger.info("Got {} instances from neighboring DS node", count);
@@ -252,7 +254,9 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
             primeAwsReplicas(applicationInfoManager);
         }
         logger.info("Changing status to UP");
+        // 设置实例的状态为UP
         applicationInfoManager.setInstanceStatus(InstanceStatus.UP);
+        // 开启定时任务，默认60秒执行一次，用于清理60秒之内没有续约的实例
         super.postInit();
     }
 
@@ -376,7 +380,9 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
     public boolean cancel(final String appName, final String id,
                           final boolean isReplication) {
         if (super.cancel(appName, id, isReplication)) {
+            //集群同步信息
             replicateToPeers(Action.Cancel, appName, id, null, null, isReplication);
+            // Eureka-Server的保护机制
             synchronized (lock) {
                 if (this.expectedNumberOfRenewsPerMin > 0) {
                     // Since the client wants to cancel it, reduce the threshold (1 for 30 seconds, 2 for a minute)
@@ -403,11 +409,15 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
      */
     @Override
     public void register(final InstanceInfo info, final boolean isReplication) {
+        // 租约的过期时间，默认90秒，也就是说当服务端超过90秒没有收到客户端的心跳，则主动剔除该节点。
         int leaseDuration = Lease.DEFAULT_DURATION_IN_SECS;
         if (info.getLeaseInfo() != null && info.getLeaseInfo().getDurationInSecs() > 0) {
+            // 如果客户端自定义了，那么以客户端为准
             leaseDuration = info.getLeaseInfo().getDurationInSecs();
         }
+        // 节点注册
         super.register(info, leaseDuration, isReplication);
+        // 复制到同等服务节点上去
         replicateToPeers(Action.Register, info.getAppName(), info.getId(), info, null, isReplication);
     }
 
@@ -419,6 +429,7 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
      */
     public boolean renew(final String appName, final String id, final boolean isReplication) {
         if (super.renew(appName, id, isReplication)) {
+            // 同步Eureka-Server集群
             replicateToPeers(Action.Heartbeat, appName, id, null, null, isReplication);
             return true;
         }
