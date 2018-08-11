@@ -1405,11 +1405,14 @@ public class DiscoveryClient implements EurekaClient {
      * isDirty flag on the instanceInfo is set to true
      */
     void refreshInstanceInfo() {
+        // 1. 判断数据中心的数据是否发生改变，
         applicationInfoManager.refreshDataCenterInfoIfRequired();
+        // 2.判断配置是否发生改变
         applicationInfoManager.refreshLeaseInfoIfRequired();
 
         InstanceStatus status;
         try {
+            // 通过健康检查器，获取应用的最新状态
             status = getHealthCheckHandler().getStatus(instanceInfo.getStatus());
         } catch (Exception e) {
             logger.warn("Exception from healthcheckHandler.getStatus, setting status to DOWN", e);
@@ -1417,6 +1420,7 @@ public class DiscoveryClient implements EurekaClient {
         }
 
         if (null != status) {
+            // 设置状态
             applicationInfoManager.setInstanceStatus(status);
         }
     }

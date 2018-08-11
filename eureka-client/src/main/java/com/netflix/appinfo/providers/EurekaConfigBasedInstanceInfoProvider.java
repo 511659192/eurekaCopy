@@ -102,7 +102,9 @@ public class EurekaConfigBasedInstanceInfoProvider implements Provider<InstanceI
 
 
             // Start off with the STARTING state to avoid traffic
+            // 默认为false
             if (!config.isInstanceEnabledOnit()) {
+                // 设置实例的状态为STARTING
                 InstanceStatus initialStatus = InstanceStatus.STARTING;
                 LOG.info("Setting initial instance status as: {}", initialStatus);
                 builder.setStatus(initialStatus);

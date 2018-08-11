@@ -417,9 +417,10 @@ public class ResponseCacheImpl implements ResponseCache {
                             payload = getPayLoad(key, registry.getApplicationsFromMultipleRegions(key.getRegions()));
                         } else {
                             tracer = serializeAllAppsTimer.start();
+                            //调用registry.getApplications() 获取应用信息。同时调用getPayLoad进行编码
                             payload = getPayLoad(key, registry.getApplications());
                         }
-                    } else if (ALL_APPS_DELTA.equals(key.getName())) {
+                    } else if (ALL_APPS_DELTA.equals(key.getName())) { // 增量获取
                         if (isRemoteRegionRequested) {
                             tracer = serializeDeltaAppsWithRemoteRegionTimer.start();
                             versionDeltaWithRegions.incrementAndGet();
@@ -433,6 +434,7 @@ public class ResponseCacheImpl implements ResponseCache {
                             payload = getPayLoad(key, registry.getApplicationDeltas());
                         }
                     } else {
+                        // 根据key直接获取注册信息
                         tracer = serializeOneApptimer.start();
                         payload = getPayLoad(key, registry.getApplication(key.getName()));
                     }

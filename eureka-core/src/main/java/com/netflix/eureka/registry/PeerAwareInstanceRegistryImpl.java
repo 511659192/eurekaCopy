@@ -136,6 +136,7 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
         this.numberOfReplicationsLastMin = new MeasuredRate(1000 * 60 * 1);
         // We first check if the instance is STARTING or DOWN, then we check explicit overrides,
         // then we check the status of a potentially existing lease.
+        // 设置状态匹配规则
         this.instanceStatusOverrideRule = new FirstMatchWinsCompositeRule(new DownOrStartingRule(),
                 new OverrideExistsRule(overriddenInstanceStatusMap), new LeaseExistsRule());
     }
@@ -204,23 +205,27 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
      */
     @Override
     public int syncUp() {
-        // Copy entire entry from neighboring DS node
+        // 获取到的注册节点数量
         int count = 0;
-
+        // 如果count==0 ， 那么默认重试5次（前提是开启了register-with-eureka = true,否则为0）
         for (int i = 0; ((i < serverConfig.getRegistrySyncRetries()) && (count == 0)); i++) {
             if (i > 0) {
                 try {
+                    // 从第二次开始，每次默认沉睡30秒
                     Thread.sleep(serverConfig.getRegistrySyncRetryWaitMs());
                 } catch (InterruptedException e) {
                     logger.warn("Interrupted during registry transfer..");
                     break;
                 }
             }
+            // 从本地内存里面获取注册实例信息
             Applications apps = eurekaClient.getApplications();
             for (Application app : apps.getRegisteredApplications()) {
                 for (InstanceInfo instance : app.getInstances()) {
                     try {
+                        // 判断是否可以注册
                         if (isRegisterable(instance)) {
+                            // 注册到当前Eureka Server里面
                             register(instance, instance.getLeaseInfo().getDurationInSecs(), true);
                             count++;
                         }
@@ -449,6 +454,7 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
                                 final InstanceStatus newStatus, String lastDirtyTimestamp,
                                 final boolean isReplication) {
         if (super.statusUpdate(appName, id, newStatus, lastDirtyTimestamp, isReplication)) {
+            // Eureka Server 集群同步
             replicateToPeers(Action.StatusUpdate, appName, id, null, newStatus, isReplication);
             return true;
         }
@@ -634,19 +640,22 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
                                   InstanceStatus newStatus /* optional */, boolean isReplication) {
         Stopwatch tracer = action.getTimer().start();
         try {
+            // 判断是否是集群同步请求，如果是，则记录最后一分钟的同步次数
             if (isReplication) {
                 numberOfReplicationsLastMin.increment();
             }
-            // If it is a replication already, do not replicate again as this will create a poison replication
+            // 集群节点为空，或者这是一个Eureka Server 同步请求，直接return
             if (peerEurekaNodes == Collections.EMPTY_LIST || isReplication) {
                 return;
             }
 
+            // 循环相邻的Eureka Server Node， 分别发起请求同步
             for (final PeerEurekaNode node : peerEurekaNodes.getPeerEurekaNodes()) {
-                // If the url represents this host, do not replicate to yourself.
+                // 判断是否是自身的URL，过滤掉
                 if (peerEurekaNodes.isThisMyUrl(node.getServiceUrl())) {
                     continue;
                 }
+                // 发起同步请求
                 replicateInstanceActionsToPeers(action, appName, id, info, newStatus, node);
             }
         } finally {
@@ -671,17 +680,18 @@ public class PeerAwareInstanceRegistryImpl extends AbstractInstanceRegistry impl
                     break;
                 case Heartbeat:
                     InstanceStatus overriddenStatus = overriddenInstanceStatusMap.get(id);
+                    // 获取本地最新的实例信息
                     infoFromRegistry = getInstanceByAppAndId(appName, id, false);
                     node.heartbeat(appName, id, infoFromRegistry, overriddenStatus, false);
                     break;
                 case Register:
                     node.register(info);
                     break;
-                case StatusUpdate:
+                case StatusUpdate: // 设置覆盖状态
                     infoFromRegistry = getInstanceByAppAndId(appName, id, false);
                     node.statusUpdate(appName, id, newStatus, infoFromRegistry);
                     break;
-                case DeleteStatusOverride:
+                case DeleteStatusOverride: //删除覆盖状态
                     infoFromRegistry = getInstanceByAppAndId(appName, id, false);
                     node.deleteStatusOverride(appName, id, infoFromRegistry);
                     break;
