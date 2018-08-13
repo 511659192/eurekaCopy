@@ -1158,9 +1158,11 @@ public class InstanceInfo {
      * @return the prev status if a different status from the current was set, null otherwise
      */
     public synchronized InstanceStatus setStatus(InstanceStatus status) {
+        // 判断状态是否一致，一致则不更新
         if (this.status != status) {
             InstanceStatus prev = this.status;
             this.status = status;
+            //调用该方法，表示信息发生修改
             setIsDirty();
             return prev;
         }

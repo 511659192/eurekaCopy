@@ -109,7 +109,7 @@ public class EurekaClientServerRestIntegrationTest {
     @Test
     public void testRegistration() throws Exception {
         InstanceInfo instanceInfo = instanceInfoIt.next();
-        EurekaHttpResponse<Void> httpResponse = jerseyEurekaClient.register(instanceInfo);
+         EurekaHttpResponse<Void> httpResponse = jerseyEurekaClient.register(instanceInfo);
 
         assertThat(httpResponse.getStatusCode(), is(equalTo(204)));
     }

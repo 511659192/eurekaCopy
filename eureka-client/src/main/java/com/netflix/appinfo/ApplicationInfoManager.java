@@ -198,8 +198,9 @@ public class ApplicationInfoManager {
      * see {@link InstanceInfo#getHostName()} for explanation on why the hostname is used as the default address
      */
     public void refreshDataCenterInfoIfRequired() {
+        // 获取当前的地址
         String existingAddress = instanceInfo.getHostName();
-
+        // 获取当前实际的地址
         String newAddress;
         if (config instanceof RefreshableInstanceConfig) {
             // Refresh data center info, and return up to date address
@@ -209,6 +210,7 @@ public class ApplicationInfoManager {
         }
         String newIp = config.getIpAddress();
 
+        // 判断新旧地址是否一致，如果不一致，则进入if结构
         if (newAddress != null && !newAddress.equals(existingAddress)) {
             logger.warn("The address changed from : {} => {}", existingAddress, newAddress);
 
@@ -217,17 +219,24 @@ public class ApplicationInfoManager {
             // We will most likely re-write the client at sometime so not fixing for now.
             InstanceInfo.Builder builder = new InstanceInfo.Builder(instanceInfo);
             builder.setHostName(newAddress).setIPAddr(newIp).setDataCenterInfo(config.getDataCenterInfo());
+            // 该方法最为重要，表示信息已经发生改变，
             instanceInfo.setIsDirty();
         }
     }
 
+    /**
+     * 判断配置中的，“租约过期时间” ， “续约时间” 是否发生改变，如果发生改变了，那么就需要
+     */
     public void refreshLeaseInfoIfRequired() {
         LeaseInfo leaseInfo = instanceInfo.getLeaseInfo();
         if (leaseInfo == null) {
             return;
         }
+        // 租约过期时间，默认90秒
         int currentLeaseDuration = config.getLeaseExpirationDurationInSeconds();
+        // 续约时间，默认30秒
         int currentLeaseRenewal = config.getLeaseRenewalIntervalInSeconds();
+        // 判断时间是否一致
         if (leaseInfo.getDurationInSecs() != currentLeaseDuration || leaseInfo.getRenewalIntervalInSecs() != currentLeaseRenewal) {
             LeaseInfo newLeaseInfo = LeaseInfo.Builder.newBuilder()
                     .setRenewalIntervalInSecs(currentLeaseRenewal)

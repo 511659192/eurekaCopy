@@ -80,8 +80,10 @@ public class PeerReplicationResource {
     public Response batchReplication(ReplicationList replicationList) {
         try {
             ReplicationListResponse batchResponse = new ReplicationListResponse();
+            // 循环请求的任务
             for (ReplicationInstance instanceInfo : replicationList.getReplicationList()) {
                 try {
+                    // 分发任务，同时将处理结果收集起来，等会统一返回
                     batchResponse.addResponse(dispatch(instanceInfo));
                 } catch (Exception e) {
                     batchResponse.addResponse(new ReplicationInstanceResponse(Status.INTERNAL_SERVER_ERROR.getStatusCode(), null));
@@ -97,11 +99,15 @@ public class PeerReplicationResource {
     }
 
     private ReplicationInstanceResponse dispatch(ReplicationInstance instanceInfo) {
+        //  创建实例
         ApplicationResource applicationResource = createApplicationResource(instanceInfo);
+        //  创建实例
         InstanceResource resource = createInstanceResource(instanceInfo, applicationResource);
-
+        //获取客户端instance的lastDirtyTimestamp  ，有点类似于版本号的概念
         String lastDirtyTimestamp = toString(instanceInfo.getLastDirtyTimestamp());
+        // 获取覆盖状态
         String overriddenStatus = toString(instanceInfo.getOverriddenStatus());
+        // 获取instance的状态
         String instanceStatus = toString(instanceInfo.getStatus());
 
         Builder singleResponseBuilder = new Builder();
@@ -135,6 +141,7 @@ public class PeerReplicationResource {
     }
 
     private static Builder handleRegister(ReplicationInstance instanceInfo, ApplicationResource applicationResource) {
+        // 调用Application控制层的接口，添加实例
         applicationResource.addInstance(instanceInfo.getInstanceInfo(), REPLICATION);
         return new Builder().setStatusCode(Status.OK.getStatusCode());
     }

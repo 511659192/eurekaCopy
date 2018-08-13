@@ -133,6 +133,7 @@ public class PeerEurekaNode {
      */
     public void register(final InstanceInfo info) throws Exception {
         long expiryTime = System.currentTimeMillis() + getLeaseRenewalOf(info);
+        // 默认采用的是批处理
         batchingDispatcher.process(
                 taskId("register", info),
                 new InstanceReplicationTask(targetHost, Action.Register, info, null, true) {
@@ -213,6 +214,7 @@ public class PeerEurekaNode {
                     if (info != null) {
                         logger.warn("{}: cannot find instance id {} and hence replicating the instance with status {}",
                                 getTaskName(), info.getId(), info.getStatus());
+                        // 重新发起注册。
                         register(info);
                     }
                 } else if (config.shouldSyncWhenTimestampDiffers()) {

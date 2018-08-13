@@ -75,8 +75,10 @@ class ReplicationTaskProcessor implements TaskProcessor<ReplicationTask> {
 
     @Override
     public ProcessingResult process(List<ReplicationTask> tasks) {
+        // 构建ReplicationInstance放入ReplicationList
         ReplicationList list = createReplicationListOf(tasks);
         try {
+            // 发起批量处理请求
             EurekaHttpResponse<ReplicationListResponse> response = replicationClient.submitBatchUpdates(list);
             int statusCode = response.getStatusCode();
             if (!isSuccess(statusCode)) {
@@ -89,6 +91,7 @@ class ReplicationTaskProcessor implements TaskProcessor<ReplicationTask> {
                     return ProcessingResult.PermanentError;
                 }
             } else {
+                // 处理执行结果 ，成功则调用handleSuccess ，失败则调用handleFailure。
                 handleBatchResponse(tasks, response.getEntity().getResponseList());
             }
         } catch (Throwable e) {

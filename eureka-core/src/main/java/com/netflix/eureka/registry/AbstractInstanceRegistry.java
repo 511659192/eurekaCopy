@@ -245,7 +245,9 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                         registrant.getAppName() + "(" + registrant.getId() + ")"));
             }
             // This is where the initial state transfer of overridden status happens
+            // 判断instance的的覆盖状态是否等于UNKONW （默认状态下就是等于UNKONW）
             if (!InstanceStatus.UNKNOWN.equals(registrant.getOverriddenStatus())) {
+                // 如果不等于，则说明被修改过，放入overriddenInstanceStatusMap
                 logger.debug("Found overridden status {} for instance {}. Checking to see if needs to be add to the "
                                 + "overrides", registrant.getOverriddenStatus(), registrant.getId());
                 if (!overriddenInstanceStatusMap.containsKey(registrant.getId())) {
@@ -253,13 +255,15 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                     overriddenInstanceStatusMap.put(registrant.getId(), registrant.getOverriddenStatus());
                 }
             }
+            // overriddenInstanceStatusMap 里面是否存在这个instanceId的覆盖状态
             InstanceStatus overriddenStatusFromMap = overriddenInstanceStatusMap.get(registrant.getId());
+            // 如果存在，则设置进去
             if (overriddenStatusFromMap != null) {
                 logger.info("Storing overridden status {} from map", overriddenStatusFromMap);
                 registrant.setOverriddenStatus(overriddenStatusFromMap);
             }
 
-            // Set the status based on the overridden status rules
+            // 计算实例的最终状态，并设置进去
             InstanceStatus overriddenInstanceStatus = getOverriddenInstanceStatus(registrant, existingLease, isReplication);
             registrant.setStatusWithoutDirty(overriddenInstanceStatus);
 
@@ -320,7 +324,7 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
             synchronized (recentCanceledQueue) {
                 recentCanceledQueue.add(new Pair<Long, String>(System.currentTimeMillis(), appName + "(" + id + ")"));
             }
-            //移除这个实例ID对应的instance状态
+            // 移除这个实例ID对应的instance状态
             InstanceStatus instanceStatus = overriddenInstanceStatusMap.remove(id);
             if (instanceStatus != null) {
                 logger.debug("Removed instance id {} from the overridden map which has value {}", id, instanceStatus.name());
@@ -377,15 +381,17 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
             // 获取lease里面的instance信息
             InstanceInfo instanceInfo = leaseToRenew.getHolder();
             if (instanceInfo != null) {
-                // touchASGCache(instanceInfo.getASGName());
+                // 获取应用实例的最终状态
                 InstanceStatus overriddenInstanceStatus = this.getOverriddenInstanceStatus(
                         instanceInfo, leaseToRenew, isReplication);
+                // 如果应用实例的最终状态为UNKONW，则无法续约
                 if (overriddenInstanceStatus == InstanceStatus.UNKNOWN) {
                     logger.info("Instance status UNKNOWN possibly due to deleted override for instance {}"
                             + "; re-register required", instanceInfo.getId());
                     RENEW_NOT_FOUND.increment(isReplication);
                     return false;
                 }
+                // 应用实例的状态和最终的状态不一致，则以最终状态为准
                 if (!instanceInfo.getStatus().equals(overriddenInstanceStatus)) {
                     logger.info(
                             "The instance status {} is different from overridden instance status {} for instance {}. "
@@ -480,7 +486,9 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                                 boolean isReplication) {
         try {
             read.lock();
+            // 更新状态的次数 状态统计
             STATUS_UPDATE.increment(isReplication);
+            // 从本地数据里面获取实例信息
             Map<String, Lease<InstanceInfo>> gMap = registry.get(appName);
             Lease<InstanceInfo> lease = null;
             if (gMap != null) {
@@ -489,6 +497,7 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
             if (lease == null) {
                 return false;
             } else {
+                // 执行一下lease的renew方法，里面主要是更新了这个instance的最后更新时间
                 lease.renew();
                 InstanceInfo info = lease.getHolder();
                 // Lease is always created with its instance info object.
@@ -497,28 +506,29 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                     logger.error("Found Lease without a holder for instance id {}", id);
                 }
                 if ((info != null) && !(info.getStatus().equals(newStatus))) {
-                    // Mark service as UP if needed
+                    // 如果新状态是UP的状态，那么启动一下serviceUp() , 主要是更新服务的注册时间
                     if (InstanceStatus.UP.equals(newStatus)) {
                         lease.serviceUp();
                     }
-                    // This is NAC overriden status
+                    // 将instance Id 和这个状态的映射信息放入覆盖缓存MAP里面去
                     overriddenInstanceStatusMap.put(id, newStatus);
-                    // Set it for transfer of overridden status to replica on
-                    // replica start up
+                    // 设置覆盖状态到实例信息里面去
                     info.setOverriddenStatus(newStatus);
                     long replicaDirtyTimestamp = 0;
                     info.setStatusWithoutDirty(newStatus);
                     if (lastDirtyTimestamp != null) {
                         replicaDirtyTimestamp = Long.valueOf(lastDirtyTimestamp);
                     }
-                    // If the replication's dirty timestamp is more than the existing one, just update
-                    // it to the replica's.
+                    // 如果replicaDirtyTimestamp 的时间大于instance的getLastDirtyTimestamp() ,则更新一下
+                    // 此处主要作用是为了设置instance的status 为新状态
                     if (replicaDirtyTimestamp > info.getLastDirtyTimestamp()) {
                         info.setLastDirtyTimestamp(replicaDirtyTimestamp);
                     }
+                    // 将instance的变化放入变化队列里面去，客户端增量获取注册信息时，会用到
                     info.setActionType(ActionType.MODIFIED);
                     recentlyChangedQueue.add(new RecentlyChangedItem(lease));
                     info.setLastUpdatedTimestamp();
+                    // 缓存过期
                     invalidateCache(appName, info.getVIPAddress(), info.getSecureVipAddress());
                 }
                 return true;
@@ -564,9 +574,12 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                     logger.error("Found Lease without a holder for instance id {}", id);
                 }
 
+                // 将这个instanceID 对应的覆盖状态信息从MAP中移除
                 InstanceStatus currentOverride = overriddenInstanceStatusMap.remove(id);
                 if (currentOverride != null && info != null) {
+                    // 设置instanceInfo的覆盖状态为UNKONW， 这是初始状态
                     info.setOverriddenStatus(InstanceStatus.UNKNOWN);
+                    // 设置instance的status为最新的状态
                     info.setStatusWithoutDirty(newStatus);
                     long replicaDirtyTimestamp = 0;
                     if (lastDirtyTimestamp != null) {
@@ -577,9 +590,12 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                     if (replicaDirtyTimestamp > info.getLastDirtyTimestamp()) {
                         info.setLastDirtyTimestamp(replicaDirtyTimestamp);
                     }
+                    // 将instance的变化放入变化队列里面去，客户端增量获取注册信息时，会用到
                     info.setActionType(ActionType.MODIFIED);
                     recentlyChangedQueue.add(new RecentlyChangedItem(lease));
+                    // 更新instance的最后更新时间
                     info.setLastUpdatedTimestamp();
+                    // 缓存过期
                     invalidateCache(appName, info.getVIPAddress(), info.getSecureVipAddress());
                 }
                 return true;
@@ -1340,7 +1356,9 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
     protected InstanceInfo.InstanceStatus getOverriddenInstanceStatus(InstanceInfo r,
                                                                     Lease<InstanceInfo> existingLease,
                                                                     boolean isReplication) {
+        // 获取匹配规则
         InstanceStatusOverrideRule rule = getInstanceInfoOverrideRule();
+        // 规则匹配
         logger.debug("Processing override status using rule: {}", rule);
         return rule.apply(r, existingLease, isReplication).status();
     }

@@ -123,12 +123,15 @@ public class ResponseCacheImpl implements ResponseCache {
     ResponseCacheImpl(EurekaServerConfig serverConfig, ServerCodecs serverCodecs, AbstractInstanceRegistry registry) {
         this.serverConfig = serverConfig;
         this.serverCodecs = serverCodecs;
+        // 是否使用只读缓存
         this.shouldUseReadOnlyResponseCache = serverConfig.shouldUseReadOnlyResponseCache();
         this.registry = registry;
-
+        // 缓存更新的时间间隔  readOnlyCacheMap 缓存更新的定时器时间间隔，默认为30秒
         long responseCacheUpdateIntervalMs = serverConfig.getResponseCacheUpdateIntervalMs();
+        // 构建读写缓存
         this.readWriteCacheMap =
                 CacheBuilder.newBuilder().initialCapacity(serverConfig.getInitialCapacityOfResponseCache())
+                        // responseCacheAutoExpirationInSeconds : readWriteCacheMap 缓存过期时间，默认为 180 秒 。
                         .expireAfterWrite(serverConfig.getResponseCacheAutoExpirationInSeconds(), TimeUnit.SECONDS)
                         .removalListener(new RemovalListener<Key, Value>() {
                             @Override
@@ -152,6 +155,7 @@ public class ResponseCacheImpl implements ResponseCache {
                             }
                         });
 
+        // 是否使用只读缓存，如果使用，此处则启动一个定时器，用来复制readWriteCacheMap 的数据至readOnlyCacheMap
         if (shouldUseReadOnlyResponseCache) {
             timer.schedule(getCacheUpdateTask(),
                     new Date(((System.currentTimeMillis() / responseCacheUpdateIntervalMs) * responseCacheUpdateIntervalMs)
@@ -181,6 +185,7 @@ public class ResponseCacheImpl implements ResponseCache {
                         Value cacheValue = readWriteCacheMap.get(key);
                         Value currentCacheValue = readOnlyCacheMap.get(key);
                         if (cacheValue != currentCacheValue) {
+                            // 如果不一致，覆盖只读缓存里面的数据，以readWriteCacheMap为准
                             readOnlyCacheMap.put(key, cacheValue);
                         }
                     } catch (Throwable th) {
@@ -261,11 +266,9 @@ public class ResponseCacheImpl implements ResponseCache {
         }
     }
 
-    /**
-     * Invalidate the cache information given the list of keys.
-     *
-     * @param keys the list of keys for which the cache information needs to be invalidated.
-     */
+    // 这个方法，是在服务下线， 过期，注册，状态变更的时候会调用的，从上面可以看到，这里的缓存清除只是会去清除readWriteCacheMap这个缓存，
+    // readOnlyCacheMap 只读 缓存并没有更新，也就说当客户端的信息发生变化之后， 只读缓存不是第一时间感知到的。
+    // 只读缓存的更新只能依赖那个30秒的定时任务来更新。
     public void invalidate(Key... keys) {
         for (Key key : keys) {
             logger.debug("Invalidating the response cache key : {} {} {} {}, {}",
@@ -406,16 +409,18 @@ public class ResponseCacheImpl implements ResponseCache {
             switch (key.getEntityType()) {
                 case Application:
                     boolean isRemoteRegionRequested = key.hasRegions();
-
+                    // 全量获取
                     if (ALL_APPS.equals(key.getName())) {
+                        // 是否是分区域获取注册表信息
                         if (isRemoteRegionRequested) {
                             tracer = serializeAllAppsWithRemoteRegionTimer.start();
                             payload = getPayLoad(key, registry.getApplicationsFromMultipleRegions(key.getRegions()));
                         } else {
                             tracer = serializeAllAppsTimer.start();
+                            //调用registry.getApplications() 获取应用信息。同时调用getPayLoad进行编码
                             payload = getPayLoad(key, registry.getApplications());
                         }
-                    } else if (ALL_APPS_DELTA.equals(key.getName())) {
+                    } else if (ALL_APPS_DELTA.equals(key.getName())) { // 增量获取
                         if (isRemoteRegionRequested) {
                             tracer = serializeDeltaAppsWithRemoteRegionTimer.start();
                             versionDeltaWithRegions.incrementAndGet();
@@ -429,6 +434,7 @@ public class ResponseCacheImpl implements ResponseCache {
                             payload = getPayLoad(key, registry.getApplicationDeltas());
                         }
                     } else {
+                        // 根据key直接获取注册信息
                         tracer = serializeOneApptimer.start();
                         payload = getPayLoad(key, registry.getApplication(key.getName()));
                     }
