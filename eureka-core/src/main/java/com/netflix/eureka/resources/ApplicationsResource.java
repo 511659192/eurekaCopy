@@ -117,7 +117,6 @@ public class ApplicationsResource {
                                   @Context UriInfo uriInfo,
                                   @Nullable @QueryParam("regions") String regionsStr) {
 
-        // 获取注册列表的区域
         boolean isRemoteRegionRequested = null != regionsStr && !regionsStr.isEmpty();
         String[] regions = null;
         if (!isRemoteRegionRequested) {
@@ -128,29 +127,26 @@ public class ApplicationsResource {
             EurekaMonitors.GET_ALL_WITH_REMOTE_REGIONS.increment();
         }
 
-        // 判断是否可以访问
+        // Check if the server allows the access to the registry. The server can
+        // restrict access if it is not
+        // ready to serve traffic depending on various reasons.
         if (!registry.shouldAllowAccess(isRemoteRegionRequested)) {
             return Response.status(Status.FORBIDDEN).build();
         }
-        // 设置API版本
         CurrentRequestVersion.set(Version.toEnum(version));
-        // 默认key的类型为JSON
         KeyType keyType = Key.KeyType.JSON;
-        // 默认设置返回类型为JSON
         String returnMediaType = MediaType.APPLICATION_JSON;
-        // 如果Accept为空，或者不包含JSON字符串（表示客户端可能不接收JSON类型），则设置返回XML类型的
         if (acceptHeader == null || !acceptHeader.contains(HEADER_JSON_VALUE)) {
             keyType = Key.KeyType.XML;
             returnMediaType = MediaType.APPLICATION_XML;
         }
-        // 构建缓存KEY
+
         Key cacheKey = new Key(Key.EntityType.Application,
                 ResponseCacheImpl.ALL_APPS,
                 keyType, CurrentRequestVersion.get(), EurekaAccept.fromString(eurekaAccept), regions
         );
 
         Response response;
-        // 判断请求接收类型是否是gzip ,如果是，则返回gzip的流出去
         if (acceptEncoding != null && acceptEncoding.contains(HEADER_GZIP_VALUE)) {
             response = Response.ok(responseCache.getGZIP(cacheKey))
                     .header(HEADER_CONTENT_ENCODING, HEADER_GZIP_VALUE)

@@ -763,7 +763,6 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
         logger.debug("Fetching applications registry with remote regions: {}, Regions argument {}",
                 includeRemoteRegion, remoteRegions);
 
-        // 默认为false
         if (includeRemoteRegion) {
             GET_ALL_WITH_REMOTE_REGIONS_CACHE_MISS.increment();
         } else {
@@ -771,14 +770,11 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
         }
         Applications apps = new Applications();
         apps.setVersion(1L);
-        // 循环该类中的CurrentHashMap, 这个MAP中，存储的是所有的客户端注册的实例信息
-        // KEY 为客户端的名称，value为客户端的集群机器信息。
         for (Entry<String, Map<String, Lease<InstanceInfo>>> entry : registry.entrySet()) {
             Application app = null;
 
             if (entry.getValue() != null) {
                 for (Entry<String, Lease<InstanceInfo>> stringLeaseEntry : entry.getValue().entrySet()) {
-                    // 获取Lease信息，里面有每个实例的instance信息，分装成Application实体
                     Lease<InstanceInfo> lease = stringLeaseEntry.getValue();
                     if (app == null) {
                         app = new Application(lease.getHolder().getAppName());
@@ -899,19 +895,15 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
     @Deprecated
     public Applications getApplicationDeltas() {
         GET_ALL_CACHE_MISS_DELTA.increment();
-        // 最近变化过的应用，初始化一个实体
         Applications apps = new Applications();
-        // 增量获取的版本号
         apps.setVersion(responseCache.getVersionDelta().get());
         Map<String, Application> applicationInstancesMap = new HashMap<String, Application>();
         try {
             write.lock();
-            // 最近产生过变化的客户端，都在这个队列里面 租约变化队列里面的数据默认保存3分钟，会有一个定时器没30秒清理一次。
             Iterator<RecentlyChangedItem> iter = this.recentlyChangedQueue.iterator();
             logger.debug("The number of elements in the delta queue is : {}",
                     this.recentlyChangedQueue.size());
             while (iter.hasNext()) {
-                // 获取队列中的lease信息，这里面封装的就是客户端的实例信息
                 Lease<InstanceInfo> lease = iter.next().getLeaseInfo();
                 InstanceInfo instanceInfo = lease.getHolder();
                 logger.debug(
@@ -920,7 +912,6 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                 Application app = applicationInstancesMap.get(instanceInfo
                         .getAppName());
                 if (app == null) {
-                    // 组装成一个Application实体，同时放入Applications里面去
                     app = new Application(instanceInfo.getAppName());
                     applicationInstancesMap.put(instanceInfo.getAppName(), app);
                     apps.addApplication(app);
@@ -945,9 +936,7 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
                 }
             }
 
-            // 获取全量的注册信息
             Applications allApps = getApplications(!disableTransparentFallback);
-            // 设置HashCode
             apps.setAppsHashCode(allApps.getReconcileHashCode());
             return apps;
         } finally {
@@ -1363,8 +1352,8 @@ public abstract class AbstractInstanceRegistry implements InstanceRegistry {
             public void run() {
                 Iterator<RecentlyChangedItem> it = recentlyChangedQueue.iterator();
                 while (it.hasNext()) {
-                    // 最后更新时间小于当前时间-3分钟，那么就会被移除
-                    if (it.next().getLastUpdateTime() < System.currentTimeMillis() - serverConfig.getRetentionTimeInMSInDeltaQueue()) {
+                    if (it.next().getLastUpdateTime() <
+                            System.currentTimeMillis() - serverConfig.getRetentionTimeInMSInDeltaQueue()) {
                         it.remove();
                     } else {
                         break;
